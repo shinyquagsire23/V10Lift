@@ -6,6 +6,9 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Map.Entry;
 
+import net.minecraft.server.WorldServer;
+
+import org.apache.commons.lang.Validate;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -16,9 +19,12 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.Chest;
 import org.bukkit.block.Sign;
+import org.bukkit.craftbukkit.CraftWorld;
 import org.bukkit.entity.Entity;
+import org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.util.Vector;
 
 class MoveLift implements Runnable
 {
@@ -67,6 +73,25 @@ class MoveLift implements Runnable
 	antiCopy.add(Material.POWERED_RAIL.getId());
 	antiCopy.add(Material.LADDER.getId());
 	antiCopy.add(Material.DETECTOR_RAIL.getId());
+  }
+  
+  public FloatingBlock spawnFallingBlock(Location location, org.bukkit.Material material, byte data) throws IllegalArgumentException {
+      Validate.notNull(location, "Location cannot be null");
+      Validate.notNull(material, "Material cannot be null");
+      Validate.isTrue(material.isBlock(), "Material must be a block");
+
+      
+      
+      double x = location.getBlockX() + 0.5;
+      double y = location.getBlockY() + 1.5;
+      double z = location.getBlockZ() + 0.5;
+      WorldServer world = ((CraftWorld)location.getWorld()).getHandle();
+
+      FloatingBlock entity = new FloatingBlock(world, x, y, z, material.getId(), data);
+      entity.c = 1; // ticksLived
+
+      world.addEntity(entity, SpawnReason.CUSTOM);
+      return entity;
   }
   
   @SuppressWarnings("unchecked")
@@ -265,8 +290,19 @@ class MoveLift implements Runnable
 		}
 	  }
 	  boolean wc = false;
+	  boolean hasFloatingBlocks = false;
+	  try
+	  {
+		  hasFloatingBlocks = lift.movingBlocks.length > 0;
+	  }
+	  catch(Exception e)
+	  {
+		  lift.movingBlocks = new FloatingBlock[lift.blocks.size()];
+	  }
+	  int currentIndex = -1;
 	  for(LiftBlock lib: lift.blocks.descendingSet())
 	  {
+		  currentIndex++;
 		world = s.getWorld(lib.world);
 		block = world.getBlockAt(lib.x, lib.y, lib.z);
 		//TODO lb.data = block.getData();
@@ -294,8 +330,36 @@ class MoveLift implements Runnable
 		  else
 			lib.serializedItemStacks = null;
 		}
-		block.setType(Material.AIR);
-		lib.y++;
+		block.setType(Material.AIR); //remove block to start lifting
+		FloatingBlock f;
+		if(!hasFloatingBlocks)
+		{
+			try
+			{
+				f = spawnFallingBlock(block.getLocation(), Material.getMaterial(lib.type), lib.data);
+				lift.movingBlocks[currentIndex] = f;
+			}
+			catch(Exception e)
+			{
+				lift.movingBlocks = new FloatingBlock[lift.blocks.size()];
+				f = spawnFallingBlock(block.getLocation(), Material.getMaterial(lib.type), lib.data);
+				lift.movingBlocks[currentIndex] = f;
+			}
+		}
+		else
+		{
+			f = lift.movingBlocks[currentIndex];
+			
+		}
+		//if(f.getVelocity().getY() < 0)
+		f.setVelocity(new Vector(0,0.01,0));
+		if(f.getLocation().getBlockY() >= lib.y + 1 && f.getLocation().getBlockY() <= to.y)
+			//lib.y = f.getLocation().getBlockY();
+			lib.y++;
+		
+		//lib.y = f.getLocation().getBlockY();
+		//if(f.getLocation().getY() > to.y - 1)
+			//f.setLocation(new Location(f.getWorld(), f.getLocation().getX(),(double)to.y - 1,f.getLocation().getZ()));
 		if(plugin.v10vAPI != null)
 		{
 		  tw = plugin.v10vAPI.getUpperWorld(world);
@@ -313,7 +377,28 @@ class MoveLift implements Runnable
 		  }
 		}
 		block = world.getBlockAt(lib.x, lib.y, lib.z);
-		block.setTypeIdAndData(lib.type, lib.data, true);
+		//if(lib.y == to.y )//|| f.getLocation().getY() >= to.y - 0.5)
+		System.out.println(f.getLocation().getY() + ", " + lib.y + ", " + to.y);
+		if(f.getLocation().getY() >= to.y * 2 - 0.5 && lib.y == to.y * 2)// - 0.5)
+		{
+			lib.y = to.y;
+			block.setTypeIdAndData(lib.type, lib.data, true); //done lifting that block
+			int nullCount = 0;
+			f.die();
+			
+			lift.movingBlocks[currentIndex] = null;
+			for(FloatingBlock b : lift.movingBlocks)
+				if(b == null)
+					nullCount++;
+			if(nullCount == lift.blocks.size())
+			{
+				for(FloatingBlock b : lift.movingBlocks)
+					if(b != null)
+						b.die();
+				lift.movingBlocks = null;
+			}
+		}
+		
 		if(world2 != null)
 		  world = world2;
 		
@@ -359,7 +444,7 @@ class MoveLift implements Runnable
 			  ent.teleport(loc);
 		  }
 		}
-	  }
+	  }//End of block foreach
 	  veiter = lift.toMove.iterator();
 	  while(veiter.hasNext())
 	  {
@@ -388,28 +473,31 @@ class MoveLift implements Runnable
 			}
 		  }
 		}
-		block = s.getWorld(lib.world).getBlockAt(lib.x, lib.y, lib.z);
-		block.setTypeIdAndData(lib.type, lib.data, true);
-		lift.blocks.add(lib);
-		if(lib.lines != null)
+		if(lib.y == to.y)
 		{
-		  bs = block.getState();
-		  if(bs instanceof Sign)
-		  {
-			sign = (Sign)bs;
-			for(int i = 0; i < 3; i++)
+			block = s.getWorld(lib.world).getBlockAt(lib.x, lib.y, lib.z);
+			block.setTypeIdAndData(lib.type, lib.data, true);
+			lift.blocks.add(lib);
+			if(lib.lines != null)
 			{
-			  sign.setLine(i, lib.lines[i]);
-			  if(i == 0 && lib.lines[i].equalsIgnoreCase(plugin.signText) &&
-					  lib.lines[1].equals(ln))
-			  {
-				sign.setLine(1, ln);
-				sign.setLine(3, ChatColor.GOLD+""+fl);
-				break;
-			  }
+				bs = block.getState();
+				if(bs instanceof Sign)
+				{
+					sign = (Sign)bs;
+					for(int i = 0; i < 3; i++)
+					{
+						sign.setLine(i, lib.lines[i]);
+						if(i == 0 && lib.lines[i].equalsIgnoreCase(plugin.signText) &&
+								lib.lines[1].equals(ln))
+						{
+							sign.setLine(1, ln);
+							sign.setLine(3, ChatColor.GOLD+""+fl);
+							break;
+						}
+					}
+					sign.update(true);
+				}
 			}
-			sign.update(true);
-		  }
 		}
 	  }
 	  if(plugin.v10vAPI != null && !lift.world.equals(tmpw))

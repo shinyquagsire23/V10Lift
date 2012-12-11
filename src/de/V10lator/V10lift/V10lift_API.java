@@ -1075,7 +1075,8 @@ public class V10lift_API
 	  plugin.movingTasks.put(lift, 
 			  plugin.getServer().getScheduler().
 			  scheduleSyncRepeatingTask(plugin, 
-					  new MoveLift(plugin, lift, l.speed), l.speed, l.speed));
+					  new MoveLift(plugin, lift, l.speed / 3), 0L, 10L));
+					  //new MoveLift(plugin, lift, l.speed / 3), l.speed / 3, l.speed / 3));
 	}
   }
   

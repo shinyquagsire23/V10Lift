@@ -36,6 +36,7 @@ class Lift implements Serializable
   boolean offline = false;
   boolean sound = true;
   HashSet<LiftBlock> offlineInputs = new HashSet<LiftBlock>();
+  FloatingBlock[] movingBlocks = null;
   DoorCloser doorCloser = null;
   
   final HashSet<V10Rope> ropes = new HashSet<V10Rope>();
